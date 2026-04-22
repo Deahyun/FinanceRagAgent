@@ -1,0 +1,38 @@
+# Environments
+.env
+.venv/
+venv/
+env/
+ENV/
+
+# Claude Code 프로젝트 설정
+.claude/
+
+# 원본 PDF — 용량 커서 제외 (README 의 국세청 다운로드 안내 참조)
+data/raw/*.pdf
+!data/raw/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Vector DB
+chroma_db/
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
