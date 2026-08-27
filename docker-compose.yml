@@ -4,6 +4,16 @@ services:
     container_name: finance-rag-agent
     ports:
       - "8000:8000"
+    env_file:
+      # 유료 API 보호 비밀번호(PAID_MODEL_PASSWORD). 파일이 없으면 무시되고,
+      # 그 경우 /chat 은 아예 잠깁니다(503) = 안전한 기본값.
+      #   cp .env_pwd.example .env_pwd  후 값을 채우세요.
+      # ! 비밀번호를 바꾼 뒤에는 restart 가 아니라 재생성해야 반영됩니다:
+      #   docker compose up -d --force-recreate agent
+      # (required: false 는 Compose v2.24+ 문법. 더 낮은 버전이면 이 두 줄을 지우고
+      #  PAID_MODEL_PASSWORD 를 아래 environment 에 직접 넣으세요.)
+      - path: ./.env_pwd
+        required: false
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}

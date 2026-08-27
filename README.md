@@ -140,6 +140,11 @@ uvicorn src.api.main:app --reload --port 8000
 
 ```bash
 echo "OPENAI_API_KEY=sk-..." > .env
+
+# /chat 보호 비밀번호 (설정하지 않으면 /chat 은 503 으로 잠깁니다)
+cp .env_pwd.example .env_pwd
+# .env_pwd 를 열어 PAID_MODEL_PASSWORD 를 실제 값으로 바꾸세요
+
 docker compose up --build -d
 
 # 컨테이너 내부에서 최초 인덱싱
@@ -154,7 +159,7 @@ curl http://localhost:8000/health
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"question": "이월결손금은 몇 년까지 공제할 수 있어?"}'
+  -d '{"question": "이월결손금은 몇 년까지 공제할 수 있어?", "password": "<비밀번호>"}'
 ```
 
 응답:
@@ -176,6 +181,68 @@ curl -X POST http://localhost:8000/chat \
 ```
 
 Swagger UI (`http://localhost:8000/docs`) 에서 `Try it out` 으로 대화형 테스트도 가능합니다.
+
+### 4. 유료 API 보호 (비밀번호)
+
+`/chat` 은 호출 한 번마다 **임베딩(검색) + LLM(생성)** 으로 실제 요금이 청구됩니다.
+데모 서버를 LAN/인터넷에 열어 두면 누구나 크레딧을 소진시킬 수 있으므로, 질의는
+비밀번호를 통과해야만 실행됩니다. 검증은 프론트엔드가 아니라 **서버에서** 수행합니다.
+
+```bash
+cp .env_pwd.example .env_pwd
+# PAID_MODEL_PASSWORD=<원하는 비밀번호>   ← .example 이 아니라 .env_pwd 를 고칠 것
+docker compose up -d agent
+```
+
+| 설정 (`.env_pwd`) | 기본값 | 설명 |
+| --- | --- | --- |
+| `PAID_MODEL_PASSWORD` | (빈 값) | `/chat` 호출 비밀번호. **비워 두면 `/chat` 은 아예 차단**(503) |
+| `PAID_SESSION_MINUTES` | `60` | 한 번 인증한 뒤 재입력 없이 쓸 수 있는 시간(분) |
+
+동작:
+
+- **fail-closed** — 비밀번호가 설정되지 않으면 `/chat` 은 열리지 않고 `503` 을 반환합니다.
+- **세션 쿠키** — `POST /unlock` 또는 첫 성공한 `/chat` 호출 시 서명된 HttpOnly 쿠키를
+  발급해, 이후 `PAID_SESSION_MINUTES` 분간은 비밀번호 없이 질의할 수 있습니다.
+  `POST /lock` 으로 즉시 해제합니다.
+- **쿠키 위조 불가** — HMAC-SHA256 서명이며, 서명 키에 비밀번호가 포함되어 있어
+  **비밀번호를 바꾸면 기존 쿠키가 모두 무효**가 됩니다.
+- **무차별 대입 완화** — 같은 IP 에서 5회 틀리면 5분간 `429` 로 차단됩니다.
+- `/health` 와 `/docs` 는 과금이 없어 계속 공개됩니다. `/health` 는 비밀번호 설정 여부와
+  남은 세션 시간만 알려주고, 비밀번호 자체는 절대 노출하지 않습니다.
+
+브라우저(`/docs`)에서 쓰는 순서:
+
+1. `POST /unlock` → `Try it out` → `{"password": "<비밀번호>"}` → `Execute`
+2. 이후 `POST /chat` 은 `password` 없이 `{"question": "..."}` 만으로 호출됩니다.
+
+```bash
+# 터미널 — 매 호출에 password 를 넣거나
+curl -X POST http://localhost:8000/chat -H "Content-Type: application/json" \
+  -d '{"question": "부가가치세 세율은?", "password": "<비밀번호>"}'
+
+# 쿠키를 저장해 재사용
+curl -c jar.txt -X POST http://localhost:8000/unlock \
+  -H "Content-Type: application/json" -d '{"password": "<비밀번호>"}'
+curl -b jar.txt -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" -d '{"question": "부가가치세 세율은?"}'
+```
+
+> **⚠️ 나중에 비밀번호를 바꿀 때:** `env_file` 값은 컨테이너가 **생성될 때** 주입되어 그대로 굳습니다.
+> `restart` 로는 반영되지 않으니 반드시 **재생성**하세요.
+>
+> ```bash
+> docker compose up -d --force-recreate agent
+> # 반영 확인 (컨테이너가 실제로 들고 있는 값)
+> docker compose exec agent printenv PAID_MODEL_PASSWORD
+> ```
+>
+> 비밀번호를 바꾸면 기존 인증 쿠키는 모두 무효가 되므로 브라우저에서 다시 입력해야 합니다.
+> 옛 비밀번호로 5회 이상 시도했다면 해당 IP 가 5분간 차단(429)된 상태일 수 있습니다 —
+> 기다리거나 위 재생성 명령으로 초기화됩니다.
+
+> CLI(`python -m src.scripts.chat_cli`)와 인덱싱 스크립트는 그래프를 직접 호출하므로
+> 비밀번호가 필요 없습니다. 이 보호는 **외부에 노출되는 HTTP 표면**만을 대상으로 합니다.
 
 ---
 

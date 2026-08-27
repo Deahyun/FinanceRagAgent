@@ -1,5 +1,7 @@
 # Environments
 .env
+# 유료 API 보호 비밀번호 (서버에서 직접 생성 — 절대 커밋 금지)
+.env_pwd
 .venv/
 venv/
 env/

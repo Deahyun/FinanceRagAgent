@@ -1,0 +1,22 @@
+# git / 개발 환경
+.git
+.gitignore
+.claude
+.venv
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 시크릿 — 절대 이미지 레이어에 굽지 말 것
+# (실행 시 값은 compose 의 environment / env_file 로 주입됩니다)
+.env
+.env_pwd
+
+# 런타임 생성물 — compose 가 바인드 마운트로 넣어주므로 이미지에 불필요
+chroma_db/
+data/raw/
+*.sqlite3
+*.log

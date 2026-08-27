@@ -63,6 +63,8 @@ FinanceRagAgent/
 ├── docker-compose.yml          # agent 서비스, 8000 포트, chroma_db/data 볼륨
 ├── requirements.txt
 ├── .env.example                # OPENAI_API_KEY / MODEL / CHROMA 설정
+├── .env_pwd.example            # PAID_MODEL_PASSWORD (실제 .env_pwd 는 gitignore)
+├── .dockerignore               # 시크릿(.env/.env_pwd)·chroma_db·data/raw 제외
 ├── .gitignore
 ├── LICENSE (MIT)
 └── README.md
@@ -129,6 +131,8 @@ class AgentState(TypedDict, total=False):
 | `CHROMA_PERSIST_DIR` | `./chroma_db` |
 | `COLLECTION_NAME` | `finance_docs` |
 | `LOG_LEVEL` | `INFO` |
+| `PAID_MODEL_PASSWORD` | `""` (빈 값 = `/chat` 차단) |
+| `PAID_SESSION_MINUTES` | `60` |
 
 LLM 은 `temperature=0` 으로 고정 (결정론적 동작 목적).
 
@@ -157,13 +161,15 @@ LLM 은 `temperature=0` 으로 고정 (결정론적 동작 목적).
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/health` | `{"status":"ok", "model": <openai_model>}` |
-| POST | `/chat` | 질문 → 에이전트 실행 → 응답 |
+| GET | `/health` | `status` / `model` / `password_required` / `password_configured` / `unlock_remaining_sec` |
+| POST | `/unlock` | 비밀번호 검증 → 서명 HttpOnly 쿠키 발급 |
+| POST | `/lock` | 인증 쿠키 삭제 |
+| POST | `/chat` | 질문 → 에이전트 실행 → 응답. **비밀번호 또는 유효 쿠키 필요** |
 
 ### `ChatRequest`
 
 ```json
-{ "question": "..." }
+{ "question": "...", "password": "..." }   // password 는 /unlock 후 생략 가능
 ```
 
 ### `ChatResponse`
@@ -182,6 +188,28 @@ LLM 은 `temperature=0` 으로 고정 (결정론적 동작 목적).
 - `retrieved_docs` 의 각 문서를 `SourceItem(source, snippet)` 으로 매핑해 반환.
 
 ---
+
+## 7-1. 유료 API 접근 제어 (`src/api/main.py`)
+
+`/chat` 은 호출마다 임베딩 + LLM 으로 실제 과금되므로, 공개 배포 시 비밀번호로 잠근다.
+LiteLLM_Demo 의 `5fe0e8d` 패턴을 이식한 것이되, **이 프로젝트에는 무료 티어가 없어서**
+모델 패턴 매칭(`PROTECTED_MODELS`) 없이 `/chat` 엔드포인트 전체를 보호한다.
+
+| 요소 | 구현 |
+|---|---|
+| 비밀번호 출처 | `.env_pwd` 의 `PAID_MODEL_PASSWORD` (gitignore + dockerignore). compose 가 `env_file: {path: ./.env_pwd, required: false}` 로 주입 |
+| fail-closed | 비밀번호 미설정 시 `/chat`·`/unlock` 모두 `503` — 실수로 열리지 않음 |
+| 세션 | `_issue_session` 이 `exp.HMAC-SHA256(exp)` 형태 서명 쿠키(`paid_session`, HttpOnly, SameSite=Lax) 발급 |
+| 서명 키 | `_session_secret()` = `paid_model_password + "|" + openai_api_key` — **비밀번호 변경 시 기존 쿠키 자동 무효** |
+| 비교 | `secrets.compare_digest` (타이밍 공격 완화) |
+| 무차별 대입 | `_fail_state[ip]`, 5회 실패 시 300초 `429`. 프로세스 메모리라 재시작 시 초기화 |
+| 검증 위치 | 서버 (`_verify_paid_access`) — 프론트/Swagger 검사는 보호 수단이 아님 |
+
+주의:
+- `_fail_state` 는 `request.client.host` 기준. **리버스 프록시 뒤에 두면 모든 요청이 같은 IP 로 보여**
+  스로틀이 전역 차단처럼 동작한다. 그 구성에선 `X-Forwarded-For` 처리(`--proxy-headers`)가 필요하다.
+- CLI(`chat_cli.py`)·`ingest.py` 는 그래프를 직접 호출하므로 게이트를 거치지 않는다 (의도된 동작).
+- `env_file` 값은 컨테이너 **생성 시점**에 굳는다. 비밀번호 변경 후 `restart` 는 무효, `up -d --force-recreate` 필요.
 
 ## 8. 실행 방법
 
@@ -247,4 +275,6 @@ curl http://localhost:8000/health
 - `route_after_verify` 의 종료 조건 변경 시 `MAX_REWRITES` 와 연동.
 - Chroma persist 디렉터리를 바꾸면 Docker 볼륨 매핑(`docker-compose.yml`) 도 수정 필요.
 - 새 문서 타입(PDF 등) 추가 시 `loader.py` 의 `rglob("*.md")` 및 로더 교체 필요.
+- `PAID_MODEL_PASSWORD` 를 바꾸면 기존 인증 쿠키가 전부 무효화된다(서명 키에 포함). 컨테이너 재생성 필요.
+- `/chat` 에 게이트가 걸려 있으므로, 이 엔드포인트를 호출하는 새 클라이언트/테스트는 `password` 또는 `/unlock` 쿠키를 넣어야 한다.
 - 샘플 데이터는 학습용 요약이며 법적 근거로 쓸 수 없다는 디스클레이머는 README 에만 있음 — API 응답에는 포함되지 않음.
