@@ -67,6 +67,21 @@ def _session_remaining(request: Request) -> int:
     return max(0, int(exp_str) - int(time.time()))
 
 
+def _password_matches(candidate: str | None) -> bool:
+    """비밀번호를 상수 시간으로 비교.
+
+    secrets.compare_digest 는 str 인자를 받으면 ASCII 만 허용하므로(한글 비밀번호나
+    비ASCII 입력이 들어오면 TypeError -> 500), 양쪽을 SHA-256 다이제스트로 바꿔
+    bytes 로 비교합니다. 길이도 32바이트로 균일해져 길이 노출도 없습니다.
+    """
+    expected = settings.paid_model_password
+    if not expected:
+        return False
+    a = hashlib.sha256((candidate or "").encode("utf-8")).digest()
+    b = hashlib.sha256(expected.encode("utf-8")).digest()
+    return secrets.compare_digest(a, b)
+
+
 def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
@@ -108,9 +123,7 @@ def _verify_paid_access(
     ip = _client_ip(request)
     _throttle_guard(ip)
 
-    if not password or not secrets.compare_digest(
-        password, settings.paid_model_password
-    ):
+    if not _password_matches(password):
         _record_failure(ip)
         raise HTTPException(
             status_code=401,
@@ -145,7 +158,7 @@ def unlock(req: UnlockRequest, request: Request, response: Response) -> dict[str
         )
     ip = _client_ip(request)
     _throttle_guard(ip)
-    if not secrets.compare_digest(req.password or "", settings.paid_model_password):
+    if not _password_matches(req.password):
         _record_failure(ip)
         raise HTTPException(status_code=401, detail="비밀번호가 올바르지 않습니다.")
     _fail_state.pop(ip, None)
