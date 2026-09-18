@@ -4,6 +4,8 @@
 
 단순 "검색 → 생성" 의 1-step RAG 가 아닌, **질문 분류 → 검색 → 답변 생성 → 근거 검증 → 재검색 루프** 의 다단계 워크플로우를 LangGraph `StateGraph` 와 조건부 엣지로 구현했습니다. 모델이 컨텍스트 부족으로 환각을 일으키지 않도록 자체 검증(grounding check)을 거치고, 근거가 부족하면 쿼리를 재작성해 다시 검색합니다.
 
+초보자용 설명과 소스 파일 해설은 [`docs/`](docs/README.md) 에 있습니다.
+
 ---
 
 ## Architecture
@@ -271,6 +273,7 @@ finance-rag-agent/
 │   ├── samples/                # 변환된 Markdown (인덱싱 소스)
 │   └── legacy_samples/         # 초기 데모용 MD (비활성)
 ├── tests/                      # pytest smoke 테스트
+├── docs/                       # 초보자용 설명 + 소스 상세
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
